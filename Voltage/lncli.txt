@@ -1,0 +1,117 @@
+lncli   --rpcserver=mutiny-nodd.u.voltageapp.io:10009   --macaroonpath admin.macaroon   --tlscertpath tls.cert   getinfo
+{
+    "version": "0.19.3-beta commit=lightning-terminal-v0.15.2-alpha",
+    "commit_hash": "911f8cae52670332fe46affd35ff18458ebd5ffb",
+    "identity_pubkey": "0368a8378a9321cd6de89e547a44bf357ade60cc9ce3768deac8e062ed2224e786",
+    "alias": "mutiny-node",
+    "color": "#ff5000",
+    "num_pending_channels": 0,
+    "num_active_channels": 0,
+    "num_inactive_channels": 0,
+    "num_peers": 0,
+    "block_height": 2612092,
+    "block_hash": "00000029fd716e772d4904ec1ec0a02c2e83a50bd1ee10deda94209ac153b5c5",
+    "best_header_timestamp": "1762979218",
+    "synced_to_chain": true,
+    "synced_to_graph": false,
+    "testnet": false,
+    "chains": [
+        {
+            "chain": "bitcoin",
+            "network": "signet"
+        }
+    ],
+    "uris": [
+        "0368a8378a9321cd6de89e547a44bf357ade60cc9ce3768deac8e062ed2224e786@54.71.27.149:20015",
+        "0368a8378a9321cd6de89e547a44bf357ade60cc9ce3768deac8e062ed2224e786@clthdmloyoyga56t4mcsvzvtc2sdu2q7wccolez4kk4l4dl53mjca4yd.onion:9735"
+    ],
+    "features": {
+        "0": {
+            "name": "data-loss-protect",
+            "is_required": true,
+            "is_known": true
+        },
+        "5": {
+            "name": "upfront-shutdown-script",
+            "is_required": false,
+            "is_known": true
+        },
+        "7": {
+            "name": "gossip-queries",
+            "is_required": false,
+            "is_known": true
+        },
+        "8": {
+            "name": "tlv-onion",
+            "is_required": true,
+            "is_known": true
+        },
+        "12": {
+            "name": "static-remote-key",
+            "is_required": true,
+            "is_known": true
+        },
+        "14": {
+            "name": "payment-addr",
+            "is_required": true,
+            "is_known": true
+        },
+        "17": {
+            "name": "multi-path-payments",
+            "is_required": false,
+            "is_known": true
+        },
+        "19": {
+            "name": "wumbo-channels",
+            "is_required": false,
+            "is_known": true
+        },
+        "23": {
+            "name": "anchors-zero-fee-htlc-tx",
+            "is_required": false,
+            "is_known": true
+        },
+        "25": {
+            "name": "route-blinding",
+            "is_required": false,
+            "is_known": true
+        },
+        "27": {
+            "name": "shutdown-any-segwit",
+            "is_required": false,
+            "is_known": true
+        },
+        "30": {
+            "name": "amp",
+            "is_required": true,
+            "is_known": true
+        },
+        "31": {
+            "name": "amp",
+            "is_required": false,
+            "is_known": true
+        },
+        "45": {
+            "name": "explicit-commitment-type",
+            "is_required": false,
+            "is_known": true
+        },
+        "55": {
+            "name": "keysend",
+            "is_required": false,
+            "is_known": true
+        },
+        "261": {
+            "name": "endorsement-x",
+            "is_required": false,
+            "is_known": true
+        },
+        "2023": {
+            "name": "script-enforced-lease",
+            "is_required": false,
+            "is_known": true
+        }
+    },
+    "require_htlc_interceptor": false,
+    "store_final_htlc_resolutions": false
+
