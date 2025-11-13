@@ -1,332 +1,158 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Slot Demo — LNbits integrado</title>
-<style>
-  body{font-family:system-ui,Arial;background:#f4f7fb;color:#0b2545;padding:18px}
-  .panel{max-width:980px;margin:18px auto;background:#fff;padding:16px;border-radius:10px;box-shadow:0 6px 20px rgba(10,40,80,0.06)}
-  h1{margin:0 0 8px}
-  .grid{display:grid;grid-template-columns:repeat(3,96px);gap:12px;justify-content:center;margin:18px 0}
-  .cell{width:96px;height:96px;border-radius:8px;background:#eef6ff;display:flex;align-items:center;justify-content:center;font-size:40px}
-  .controls{text-align:center;margin-top:8px}
-  button{padding:10px 12px;border-radius:8px;border:0;background:#0b78ff;color:white;font-weight:700;cursor:pointer;margin:6px}
-  .muted{font-size:0.9rem;color:#4a6b8a}
-  input, select{padding:8px;border-radius:6px;border:1px solid #d6e0f0;margin-right:8px}
-  table{width:100%;border-collapse:collapse;margin-top:12px}
-  th,td{padding:6px;border-bottom:1px solid #eef5ff;text-align:left}
-  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-  .small{font-size:0.9rem;color:#4a6b8a}
-  #invoiceContainer{margin-top:12px;padding:10px;border-radius:8px;background:#fcfdff;border:1px solid #eef5ff}
-  #qrCanvas{width:220px;height:220px}
-  #txTable tbody tr:nth-child(odd){background:#fbfdff}
-</style>
-</head>
-<body>
-  <div class="panel">
-    <h1>Slot Demo — LNbits (depósitos reales)</h1>
+  <head>
+    <meta charset="UTF-8" />
+    <title>🎰 TragaBitcoins</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+      body {
+        background: radial-gradient(circle at center, #222, #000);
+        color: #fff;
+        font-family: "Poppins", sans-serif;
+        text-align: center;
+        margin: 0;
+        padding: 0;
+      }
+      h1 {
+        margin-top: 20px;
+        font-size: 2.5em;
+        color: gold;
+      }
+      #login {
+        margin-top: 50px;
+      }
+      input,
+      button {
+        padding: 10px;
+        border: none;
+        border-radius: 6px;
+        margin: 5px;
+        font-size: 1em;
+      }
+      input {
+        width: 200px;
+      }
+      button {
+        background-color: gold;
+        color: #000;
+        font-weight: bold;
+        cursor: pointer;
+      }
+      #slot {
+        font-size: 5em;
+        margin: 30px;
+      }
+      #balance {
+        font-size: 1.2em;
+        margin: 10px;
+      }
+      #invoiceBox {
+        background: #111;
+        border: 2px solid gold;
+        padding: 10px;
+        margin: 15px auto;
+        width: 80%;
+        display: none;
+        border-radius: 8px;
+      }
+      #invoiceBox code {
+        font-family: monospace;
+        color: lime;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🎰 TragaBitcoins</h1>
 
-    <div id="authRow" class="row" style="margin-bottom:10px">
-      <label>Usuario / Lightning ID: <input id="username" placeholder="ej: emi o alias@node"/></label>
-      <button id="btnLogin">Login / Registrar</button>
-      <div id="loginMsg" class="muted"></div>
+    <div id="login">
+      <input id="username" placeholder="Tu nombre..." />
+      <button id="loginBtn">Entrar</button>
     </div>
 
-    <div id="mainUI" style="display:none">
-      <div class="row" style="margin-top:10px">
-        <div>
-          <div class="small">Usuario:</div>
-          <div id="usernameDisplay" style="font-weight:700">—</div>
-        </div>
-        <div>
-          <div class="small">Balance:</div>
-          <div id="balanceSats" style="font-weight:700">0 sats</div>
-          <div id="balanceBtc" class="muted">0 BTC</div>
-        </div>
-        <div style="margin-left:auto">
-          <div class="small">Tiradas totales:</div>
-          <div id="totalSpins" style="font-weight:700">0</div>
-        </div>
+    <div id="game" style="display: none">
+      <p id="userDisplay"></p>
+      <p id="balance">Saldo: 0 sats</p>
+
+      <div>
+        <input id="depositAmount" type="number" placeholder="Monto (sats)" />
+        <button id="depositBtn">Depositar ⚡</button>
       </div>
 
-      <hr/>
-
-      <div class="row" style="margin-top:8px;align-items:center">
-        <label>Apuesta (créditos): 
-          <select id="betSelect">
-            <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
-          </select>
-        </label>
-        <label>Sats / crédito: <input id="satsPerCredit" value="1000" style="width:120px" /></label>
-        <button id="btnPlay">Girar</button>
-
-        <div style="margin-left:20px">
-          <label>Depositar sats (LN): <input id="depositInput" placeholder="1000" style="width:120px" /></label>
-          <button id="btnDeposit">Generar invoice</button>
-        </div>
+      <div id="invoiceBox">
+        <p>Factura LN:</p>
+        <code id="invoice"></code>
+        <p>Escanea con tu billetera ⚡</p>
+        <button id="simulateBtn">Simular Pago</button>
       </div>
 
-      <div id="invoiceContainer" style="display:none">
-        <div class="small">Factura / Invoice (pagar con tu wallet Lightning):</div>
-        <canvas id="qrCanvas"></canvas>
-        <div id="bolt11" style="margin-top:8px;word-break:break-all;"></div>
-        <div style="margin-top:8px">
-          <button id="btnCheckPayment">Comprobar pago ahora</button>
-          <span id="paymentStatus" class="muted"></span>
-        </div>
-      </div>
-
-      <div class="grid" id="grid" style="margin-top:14px">
-        <div class="cell" id="c0">—</div>
-        <div class="cell" id="c1">—</div>
-        <div class="cell" id="c2">—</div>
-        <div class="cell" id="c3">—</div>
-        <div class="cell" id="c4">—</div>
-        <div class="cell" id="c5">—</div>
-        <div class="cell" id="c6">—</div>
-        <div class="cell" id="c7">—</div>
-        <div class="cell" id="c8">—</div>
-      </div>
-
-      <div class="controls" style="margin-top:8px">
-        <div id="resultMsg" class="muted"></div>
-      </div>
-
-      <hr/>
-      <h3>Historial</h3>
-      <table id="txTable"><thead><tr><th>#</th><th>Tipo</th><th>Detalle</th><th>Sats</th><th>Balance</th></tr></thead><tbody></tbody></table>
+      <div id="slot">🍒 🍋 🍊</div>
+      <button id="spinBtn">Girar 🎰</button>
+      <p id="result"></p>
     </div>
-  </div>
 
-<script src="/socket.io/socket.io.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-<script>
-(() => {
-  const socket = io();
-  let currentUser = null;
-  let pollInterval = null;
-  let lastPaymentHash = null;
-  let totalSpins = 0;
+    <script>
+      const socket = io();
+      const loginDiv = document.getElementById("login");
+      const gameDiv = document.getElementById("game");
+      const userDisplay = document.getElementById("userDisplay");
+      const balanceDisplay = document.getElementById("balance");
+      const invoiceBox = document.getElementById("invoiceBox");
+      const invoiceText = document.getElementById("invoice");
+      const result = document.getElementById("result");
 
-  // Elements
-  const usernameEl = document.getElementById('username');
-  const btnLogin = document.getElementById('btnLogin');
-  const loginMsg = document.getElementById('loginMsg');
-  const mainUI = document.getElementById('mainUI');
-  const usernameDisplay = document.getElementById('usernameDisplay');
-  const balanceSatsEl = document.getElementById('balanceSats');
-  const balanceBtcEl = document.getElementById('balanceBtc');
-  const totalSpinsEl = document.getElementById('totalSpins');
-  const btnPlay = document.getElementById('btnPlay');
-  const betSelect = document.getElementById('betSelect');
-  const satsPerCreditEl = document.getElementById('satsPerCredit');
-  const depositInput = document.getElementById('depositInput');
-  const btnDeposit = document.getElementById('btnDeposit');
-  const invoiceContainer = document.getElementById('invoiceContainer');
-  const qrCanvas = document.getElementById('qrCanvas');
-  const bolt11El = document.getElementById('bolt11');
-  const btnCheckPayment = document.getElementById('btnCheckPayment');
-  const paymentStatus = document.getElementById('paymentStatus');
-  const txTableBody = document.querySelector('#txTable tbody');
-  const resultMsg = document.getElementById('resultMsg');
-  const gridCells = Array.from(document.querySelectorAll('.cell'));
+      document.getElementById("loginBtn").onclick = () => {
+        const username = document.getElementById("username").value.trim();
+        socket.emit("login", username);
+      };
 
-  // helpers
-  function satsToBtc(sats){ return (sats/100000000).toFixed(8) + ' BTC'; }
-  function updateBalanceUI(balance){
-    balanceSatsEl.textContent = `${Number(balance).toLocaleString()} sats`;
-    balanceBtcEl.textContent = satsToBtc(Number(balance));
-  }
-  function pushTx(type, detail, sats, balance){
-    const tr = document.createElement('tr');
-    const idx = txTableBody.children.length + 1;
-    tr.innerHTML = `<td>${idx}</td><td>${type}</td><td>${detail}</td><td>${sats>0? '+'+sats:'-'+Math.abs(sats)}</td><td>${balance}</td>`;
-    txTableBody.insertBefore(tr, txTableBody.firstChild);
-    while(txTableBody.children.length > 500) txTableBody.removeChild(txTableBody.lastChild);
-  }
-
-  // Login: first use REST to get user and then tell socket
-  btnLogin.addEventListener('click', async ()=>{
-    const username = usernameEl.value.trim();
-    if(!username) return alert('Ingresa un nombre o dirección Lightning');
-    try {
-      const r = await fetch('/api/login', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ username })
-      });
-      const data = await r.json();
-      if (r.status !== 200) {
-        loginMsg.textContent = data.error || 'Error en login';
-        return;
-      }
-      currentUser = data;
-      usernameDisplay.textContent = currentUser.username;
-      updateBalanceUI(currentUser.balance);
-      mainUI.style.display = 'block';
-      document.getElementById('authRow').style.display = 'none';
-      loginMsg.textContent = '';
-
-      // also notify socket so server stores socket.data.userId
-      socket.emit('login', { username: currentUser.username });
-    } catch (err) {
-      console.error('login error', err);
-      alert('Error conectando al servidor');
-    }
-  });
-
-  // Deposit: create invoice via REST
-  btnDeposit.addEventListener('click', async ()=>{
-    if(!currentUser) return alert('Primero haz login');
-    const raw = depositInput.value.trim();
-    const sats = parseInt(raw, 10);
-    if(isNaN(sats) || sats <= 0) return alert('Cantidad inválida (sats)');
-    try {
-      btnDeposit.disabled = true;
-      paymentStatus.textContent = 'Generando invoice...';
-      const r = await fetch('/api/create_invoice', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ userId: currentUser.id, sats })
-      });
-      const data = await r.json();
-      if (!r.ok || !data.invoice) {
-        console.error('create_invoice error', data);
-        alert('Error creando invoice: ' + (data.error || JSON.stringify(data)));
-        btnDeposit.disabled = false;
-        paymentStatus.textContent = '';
-        return;
-      }
-
-      // show invoice + QR
-      lastPaymentHash = data.payment_hash;
-      bolt11El.textContent = data.invoice;
-      invoiceContainer.style.display = 'block';
-      paymentStatus.textContent = 'Invoice generado — espera a pagar con tu wallet';
-      // render QR
-      QRCode.toCanvas(qrCanvas, data.invoice, { width: 220 }, function (err) {
-        if (err) console.error(err);
+      socket.on("loginSuccess", (data) => {
+        loginDiv.style.display = "none";
+        gameDiv.style.display = "block";
+        userDisplay.innerText = `Jugador: ${data.username}`;
+        balanceDisplay.innerText = `Saldo: ${data.balance} sats`;
       });
 
-      // start polling automatically every 5s
-      startPollingPayment(currentUser.id, data.payment_hash);
-    } catch (err) {
-      console.error('btnDeposit error', err);
-      alert('Error al crear invoice');
-    } finally {
-      btnDeposit.disabled = false;
-    }
-  });
+      socket.on("loginError", (msg) => alert(msg));
 
-  // Manual check button
-  btnCheckPayment.addEventListener('click', async ()=>{
-    if(!lastPaymentHash) return alert('No hay invoice generado');
-    await checkPaymentNow(currentUser.id, lastPaymentHash);
-  });
+      // --- DEPOSIT ---
+      document.getElementById("depositBtn").onclick = () => {
+        const amount = parseInt(document.getElementById("depositAmount").value);
+        socket.emit("requestDeposit", amount);
+      };
 
-  // Polling logic
-  function startPollingPayment(userId, payment_hash){
-    if(pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(()=> checkPaymentNow(userId, payment_hash), 5000);
-  }
-  async function checkPaymentNow(userId, payment_hash){
-    try {
-      paymentStatus.textContent = 'Comprobando pago...';
-      const r = await fetch('/api/check_payment', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ userId, payment_hash })
+      socket.on("depositInvoice", (invoice) => {
+        invoiceBox.style.display = "block";
+        invoiceText.innerText = invoice;
       });
-      const data = await r.json();
-      if (!r.ok) {
-        console.error('check_payment error', data);
-        paymentStatus.textContent = 'Error comprobando pago';
-        return;
-      }
-      if (data.success) {
-        paymentStatus.textContent = `Pago recibido: ${data.paidSats ?? data.paid ?? 0} sats — balance actualizado`;
-        // update local UI
-        currentUser.balance = data.balance;
-        updateBalanceUI(data.balance);
-        pushTx('deposit','depósito LNbits', data.paidSats || data.paid || 0, data.balance);
-        // stop polling
-        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-        // hide invoice
-        setTimeout(()=> invoiceContainer.style.display = 'none', 1200);
-      } else {
-        paymentStatus.textContent = 'Aún no pagado';
-      }
-    } catch (err) {
-      console.error('checkPaymentNow error', err);
-      paymentStatus.textContent = 'Error comprobando pago';
-    }
-  }
 
-  // Spin via socket
-  btnPlay.addEventListener('click', ()=>{
-    if(!currentUser) return alert('Debes iniciar sesión');
-    const betCredits = Number(betSelect.value);
-    const satsPerCredit = Number(satsPerCreditEl.value) || 1000;
-    socket.emit('spin', { betCredits, satsPerCredit });
-    resultMsg.textContent = 'Solicitando giro...';
-  });
+      socket.on("depositError", (msg) => alert(msg));
 
-  // Socket events
-  socket.on('connect', ()=> console.log('socket connected'));
-  socket.on('login-success', data => {
-    // socket login success - server responded
-    console.log('socket login-success', data);
-  });
-  socket.on('login-error', msg => {
-    console.warn('socket login-error', msg);
-  });
+      document.getElementById("simulateBtn").onclick = () => {
+        const amount = parseInt(document.getElementById("depositAmount").value);
+        socket.emit("simulatePayment", amount);
+        invoiceBox.style.display = "none";
+      };
 
-  socket.on('spin-result', data => {
-    // animate and show result
-    animateColumns(data.columns);
-    const prize = Number(data.prize || 0);
-    const balance = Number(data.balance || 0);
-    updateBalanceUI(balance);
-    if(prize > 0) {
-      resultMsg.textContent = `Ganaste ${prize.toLocaleString()} sats!`;
-      pushTx('win', `Premio`, prize, balance);
-    } else {
-      resultMsg.textContent = 'Sin premio';
-      pushTx('bet', `Apuesta`, - (Number(betSelect.value) * Number(satsPerCreditEl.value) || 0), balance);
-    }
-    totalSpins++;
-    totalSpinsEl.textContent = totalSpins;
-  });
+      socket.on("balanceUpdate", (newBalance) => {
+        balanceDisplay.innerText = `Saldo: ${newBalance} sats`;
+      });
 
-  socket.on('error', msg => {
-    alert('Error servidor: ' + msg);
-  });
+      // --- SPIN ---
+      document.getElementById("spinBtn").onclick = () => {
+        socket.emit("spin");
+      };
 
-  // Animation helper
-  function animateColumns(tempCols){
-    const cells = gridCells;
-    let cycles = 12;
-    const t = setInterval(()=> {
-      cells.forEach(c => { c.textContent = ['🍒','🍋','🍉','🔔','💎','7️⃣','⭐'][Math.floor(Math.random()*7)]; });
-      cycles--;
-      if(cycles<=0){ clearInterval(t);
-        for(let col=0; col<3; col++){
-          for(let row=0; row<3; row++){
-            const idx = col + row*3;
-            cells[idx].textContent = tempCols[col][row];
-          }
-        }
-      }
-    }, 60);
-  }
+      socket.on("spinResult", (data) => {
+        document.getElementById("slot").innerText = data.result.join(" ");
+        result.innerText =
+          data.win > 0
+            ? `🎉 Ganaste ${data.win} sats!`
+            : "😢 Sin premio...";
+        balanceDisplay.innerText = `Saldo: ${data.balance} sats`;
+      });
 
-  // cleanup on unload
-  window.addEventListener('beforeunload', () => {
-    if(pollInterval) clearInterval(pollInterval);
-  });
-
-})();
-</script>
-</body>
+      socket.on("spinError", (msg) => alert(msg));
+    </script>
+  </body>
 </html>

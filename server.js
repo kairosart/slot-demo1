@@ -1,294 +1,171 @@
-// server.js (ESM)
+// server.js
 import express from "express";
-import { createServer } from "http";
+import http from "http";
 import { Server } from "socket.io";
-import sqlite3 from "sqlite3";
-import { open } from "sqlite";
-import dotenv from "dotenv";
+import fetch from "node-fetch";
 import path from "path";
 import { fileURLToPath } from "url";
+import sqlite3 from "sqlite3";
+import dotenv from "dotenv";
+import fs from "fs";
 
-// load env
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const LNBITS_URL = process.env.LNBITS_URL || "https://demo.lnbits.com";
-const LNBITS_ADMIN_KEY = process.env.LNBITS_ADMIN_KEY || "8fb982a7fbda42b085436dd8617b3b5f";
-
-if (!LNBITS_URL || !LNBITS_ADMIN_KEY) {
-  console.warn("⚠️  Warning: LNBITS_URL or LNBITS_ADMIN_KEY not set in environment. Deposit will fail until set.");
-}
-
-// fetch compat (Node 18+ tiene fetch global)
-let fetchLib = globalThis.fetch;
-if (!fetchLib) {
-  const mod = await import("node-fetch");
-  fetchLib = mod.default;
-}
-
 const app = express();
-const httpServer = createServer(app);
-const io = new Server(httpServer);
+const server = http.createServer(app);
+const io = new Server(server);
 
 app.use(express.json());
-
-// ✅ sirve archivos estáticos desde /public
 app.use(express.static(path.join(__dirname, "public")));
 
-// ---------- DB init ----------
-const db = await open({
-  filename: path.join(__dirname, "slot.db"),
-  driver: sqlite3.Database,
+// === DATABASE ===
+const db = new sqlite3.Database("slots.db");
+db.serialize(() => {
+  db.run(`CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE,
+    balance INTEGER DEFAULT 0
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS deposits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT,
+    invoice TEXT,
+    amount INTEGER,
+    paid INTEGER DEFAULT 0
+  )`);
 });
 
-await db.exec(`
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT UNIQUE,
-  balance INTEGER DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS spins (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER,
-  nonce INTEGER,
-  lines TEXT,
-  prize INTEGER,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS invoices (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER,
-  amount INTEGER,
-  payment_hash TEXT UNIQUE,
-  payment_request TEXT,
-  paid INTEGER DEFAULT 0,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-`);
+// === LND CONFIG ===
+const LND_REST_URL = process.env.LND_REST_URL;
+const TLS_CERT_PATH = process.env.TLS_CERT_PATH;
+const MACAROON_PATH = process.env.MACAROON_PATH;
 
-// ---------- Helpers ----------
-const SYMBOLS = ["🍒", "🍋", "🍉", "🔔", "💎", "7️⃣", "⭐"];
-const PAY = {
-  "⭐,⭐,⭐": 360,
-  "7️⃣,7️⃣,7️⃣": 156,
-  "💎,💎,💎": 84,
-  "🔔,🔔,🔔": 21,
-  "🍉,🍉,🍉": 8,
-  "🍋,🍋,🍋": 2,
-  "🍒,🍒,🍒": 3,
-};
-
-function randomSpin() {
-  const cols = [];
-  for (let c = 0; c < 3; c++) {
-    const col = [];
-    for (let r = 0; r < 3; r++) {
-      col.push(SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)]);
-    }
-    cols.push(col);
-  }
-  const lines = [
-    [cols[0][1], cols[1][1], cols[2][1]],
-    [cols[0][0], cols[1][1], cols[2][2]],
-    [cols[0][2], cols[1][1], cols[2][0]],
-  ];
-  let prizeCredits = 0;
-  const winners = [];
-  for (let i = 0; i < lines.length; i++) {
-    const key = lines[i].join(",");
-    const p = PAY[key] || 0;
-    if (p > 0) winners.push({ lineIndex: i + 1, triple: key, prizeCredits: p });
-    prizeCredits += p;
-  }
-  return { columns: cols, lines, winners, prizeCredits };
+if (!LND_REST_URL || !TLS_CERT_PATH || !MACAROON_PATH) {
+  console.warn("⚠️ Missing LND credentials in .env. Deposits will fail.");
 }
 
-// ---------- REST: login / invoice / check ----------
-app.post("/api/login", async (req, res) => {
-  try {
-    const { username } = req.body;
-    if (!username || typeof username !== "string" || username.trim().length === 0)
-      return res.status(400).json({ error: "username inválido" });
+// Convert macaroon to HEX automatically
+let MACAROON_HEX = null;
+try {
+  const macaroon = fs.readFileSync(MACAROON_PATH);
+  MACAROON_HEX = macaroon.toString("hex");
+  console.log("✅ Macaroon loaded and converted to HEX");
+} catch (err) {
+  console.error("❌ Error reading macaroon:", err.message);
+}
 
-    const clean = username.trim();
-    let user = await db.get("SELECT * FROM users WHERE username = ?", clean);
-    if (!user) {
-      const info = await db.run("INSERT INTO users (username, balance) VALUES (?, 0)", clean);
-      user = await db.get("SELECT * FROM users WHERE id = ?", info.lastID);
-    }
+let TLS_CERT = null;
+try {
+  TLS_CERT = fs.readFileSync(TLS_CERT_PATH);
+  console.log("✅ TLS cert loaded");
+} catch (err) {
+  console.error("❌ Error reading TLS cert:", err.message);
+}
 
-    res.json({ id: user.id, username: user.username, balance: user.balance });
-  } catch (e) {
-    console.error("login error", e);
-    res.status(500).json({ error: "error interno" });
-  }
-});
-
-// ---------- LNbits: create invoice ----------
-app.post("/api/create_invoice", async (req, res) => {
-  try {
-    const { userId, sats } = req.body;
-    const u = Number(userId);
-    const s = Number(sats);
-    if (!u || isNaN(s) || s <= 0) {
-      return res.status(400).json({ error: "userId o sats inválidos (sats>0)" });
-    }
-
-    const payload = {
-      out: false,
-      amount: Math.floor(s),
-      memo: `Depósito Slot: ${s} sats (user ${u})`,
-    };
-
-    const resp = await fetchLib(`${LNBITS_URL.replace(/\/$/, "")}/api/v1/payments`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Api-Key": LNBITS_ADMIN_KEY,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await resp.json();
-    if (!resp.ok || !data?.payment_request || !data?.payment_hash) {
-      console.error("LNbits create invoice failed:", resp.status, data);
-      return res.status(500).json({ error: "Error creando invoice LNbits", details: data });
-    }
-
-    await db.run(
-      "INSERT OR IGNORE INTO invoices (user_id, amount, payment_hash, payment_request, paid) VALUES (?, ?, ?, ?, 0)",
-      u,
-      s,
-      data.payment_hash,
-      data.payment_request
-    );
-
-    res.json({ invoice: data.payment_request, payment_hash: data.payment_hash });
-  } catch (err) {
-    console.error("/api/create_invoice error:", err);
-    res.status(500).json({ error: "error interno" });
-  }
-});
-
-// ---------- LNbits: check payment ----------
-app.post("/api/check_payment", async (req, res) => {
-  try {
-    const { userId, payment_hash } = req.body;
-    const u = Number(userId);
-    if (!u || !payment_hash) return res.status(400).json({ error: "userId o payment_hash inválidos" });
-
-    const resp = await fetchLib(`${LNBITS_URL.replace(/\/$/, "")}/api/v1/payments/${encodeURIComponent(payment_hash)}`, {
-      headers: { "X-Api-Key": LNBITS_ADMIN_KEY },
-    });
-    const data = await resp.json();
-
-    if (!resp.ok) {
-      console.error("LNbits check payment failed:", resp.status, data);
-      return res.status(500).json({ error: "Error consultando LNbits", details: data });
-    }
-
-    if (data.paid) {
-      const paidAmount = Number(data.amount ?? data.details?.amount ?? 0);
-      const paidSats = paidAmount > 1000000 ? Math.floor(paidAmount / 1000) : paidAmount;
-
-      const inv = await db.get("SELECT * FROM invoices WHERE payment_hash = ?", payment_hash);
-      if (!inv) {
-        await db.run(
-          "INSERT INTO invoices (user_id, amount, payment_hash, payment_request, paid) VALUES (?, ?, ?, ?, 1)",
-          u,
-          paidSats,
-          payment_hash,
-          ""
-        );
-      } else if (!inv.paid) {
-        await db.run("UPDATE invoices SET paid = 1 WHERE payment_hash = ?", payment_hash);
-      }
-
-      const user = await db.get("SELECT * FROM users WHERE id = ?", u);
-      const newBalance = (user.balance || 0) + paidSats;
-      await db.run("UPDATE users SET balance = ? WHERE id = ?", newBalance, u);
-
-      return res.json({ success: true, balance: newBalance, paidSats });
-    }
-
-    res.json({ success: false, details: data });
-  } catch (err) {
-    console.error("/api/check_payment error:", err);
-    res.status(500).json({ error: "error interno" });
-  }
-});
-
-// ---------- Socket.IO ----------
-io.on("connection", (socket) => {
-  console.log("socket connected", socket.id);
-
-  socket.on("login", async ({ username }) => {
-    try {
-      if (!username || typeof username !== "string")
-        return socket.emit("login-error", "username inválido");
-      const clean = username.trim();
-      let user = await db.get("SELECT * FROM users WHERE username = ?", clean);
-      if (!user) {
-        const r = await db.run("INSERT INTO users(username) VALUES (?)", clean);
-        user = await db.get("SELECT * FROM users WHERE id = ?", r.lastID);
-      }
-      socket.data.userId = user.id;
-      socket.emit("login-success", { id: user.id, username: user.username, balance: user.balance });
-    } catch (e) {
-      console.error("socket login error", e);
-      socket.emit("login-error", "error interno");
-    }
-  });
-
-  socket.on("spin", async ({ betCredits, satsPerCredit }) => {
-    try {
-      const userId = socket.data.userId;
-      if (!userId) return socket.emit("error", "No logueado");
-      const user = await db.get("SELECT * FROM users WHERE id = ?", userId);
-      if (!user) return socket.emit("error", "Usuario no encontrado");
-      const betCreditsN = Number(betCredits);
-      const satsPerCreditN = Number(satsPerCredit);
-      if (!betCreditsN || !satsPerCreditN) return socket.emit("error", "Parámetros inválidos");
-      const cost = betCreditsN * satsPerCreditN;
-      if ((user.balance || 0) < cost) return socket.emit("error", "Saldo insuficiente");
-
-      const afterBet = user.balance - cost;
-      await db.run("UPDATE users SET balance = ? WHERE id = ?", afterBet, userId);
-
-      const spinRes = randomSpin();
-      const prizeSats = (spinRes.prizeCredits || 0) * satsPerCreditN;
-      const finalBalance = afterBet + prizeSats;
-
-      await db.run(
-        "INSERT INTO spins (user_id, nonce, lines, prize) VALUES (?, ?, ?, ?)",
-        userId,
-        Date.now(),
-        JSON.stringify(spinRes.lines),
-        prizeSats
-      );
-
-      await db.run("UPDATE users SET balance = ? WHERE id = ?", finalBalance, userId);
-
-      socket.emit("spin-result", {
-        columns: spinRes.columns,
-        winners: spinRes.winners,
-        prize: prizeSats,
-        balance: finalBalance,
-      });
-    } catch (err) {
-      console.error("spin error", err);
-      socket.emit("error", "Error al girar");
-    }
-  });
-});
-
-// ✅ sirve index.html para cualquier ruta desconocida
-app.get("*", (req, res) => {
+// === ROUTES ===
+app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// start server
+// === SOCKET.IO ===
+io.on("connection", (socket) => {
+  console.log("🟢 Client connected:", socket.id);
+
+  // --- LOGIN ---
+  socket.on("login", (username) => {
+    if (!username) return socket.emit("loginError", "Nombre inválido");
+
+    db.get("SELECT * FROM users WHERE username = ?", [username], (err, row) => {
+      if (err) return socket.emit("loginError", "DB error");
+      if (!row) {
+        db.run("INSERT INTO users (username, balance) VALUES (?, ?)", [username, 0]);
+        console.log("Nuevo usuario:", username);
+        socket.username = username;
+        socket.emit("loginSuccess", { username, balance: 0 });
+      } else {
+        socket.username = username;
+        socket.emit("loginSuccess", { username, balance: row.balance });
+      }
+    });
+  });
+
+  // --- REQUEST DEPOSIT ---
+  socket.on("requestDeposit", async (amount) => {
+    if (!socket.username) return socket.emit("depositError", "No logueado");
+    if (!amount || amount <= 0) return socket.emit("depositError", "Cantidad inválida");
+
+    try {
+      console.log(`⚡ Creating invoice for ${socket.username}, amount: ${amount} sats`);
+
+      const response = await fetch(`${LND_REST_URL}/v1/invoices`, {
+        method: "POST",
+        headers: {
+          "Grpc-Metadata-macaroon": MACAROON_HEX,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          value: amount, // LND espera "value", no "amount"
+          memo: `Depósito ${socket.username}`,
+        }),
+      });
+
+      const data = await response.json();
+      console.log("📡 LND response:", data);
+
+      if (!data.payment_request) throw new Error("Error creando invoice");
+
+      db.run(
+        "INSERT INTO deposits (username, invoice, amount, paid) VALUES (?, ?, ?, 0)",
+        [socket.username, data.payment_request, amount]
+      );
+
+      socket.emit("depositInvoice", data.payment_request);
+    } catch (err) {
+      console.error("Deposit error:", err);
+      socket.emit("depositError", "Error creando factura");
+    }
+  });
+
+  // --- SIMULATE PAYMENT CHECK ---
+  socket.on("simulatePayment", (amount) => {
+    if (!socket.username) return;
+    db.run("UPDATE users SET balance = balance + ? WHERE username = ?", [amount, socket.username]);
+    db.get("SELECT balance FROM users WHERE username = ?", [socket.username], (err, row) => {
+      socket.emit("balanceUpdate", row.balance);
+    });
+  });
+
+  // --- SPIN SLOT ---
+  socket.on("spin", () => {
+    if (!socket.username) return socket.emit("spinError", "No logueado");
+    const bet = 10;
+
+    db.get("SELECT balance FROM users WHERE username = ?", [socket.username], (err, row) => {
+      if (err || !row) return socket.emit("spinError", "Usuario no encontrado");
+      if (row.balance < bet) return socket.emit("spinError", "Saldo insuficiente");
+
+      const reels = [
+        ["🍒", "🍋", "🍊", "🍉", "⭐", "💎"],
+        ["🍒", "🍋", "🍊", "🍉", "⭐", "💎"],
+        ["🍒", "🍋", "🍊", "🍉", "⭐", "💎"],
+      ];
+
+      const result = reels.map((r) => r[Math.floor(Math.random() * r.length)]);
+      let win = 0;
+      if (result[0] === result[1] && result[1] === result[2]) {
+        win = bet * 10;
+      }
+
+      const newBalance = row.balance - bet + win;
+      db.run("UPDATE users SET balance = ? WHERE username = ?", [newBalance, socket.username]);
+      socket.emit("spinResult", { result, win, balance: newBalance });
+    });
+  });
+});
+
+// === START SERVER ===
 const PORT = process.env.PORT || 3000;
-httpServer.listen(PORT, () => console.log(`✅ Servidor listo en http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Server running at http://localhost:${PORT}`));
